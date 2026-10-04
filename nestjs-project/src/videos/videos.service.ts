@@ -1,18 +1,29 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import type { ConfigType } from '@nestjs/config';
-import { Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import type { Queue } from 'bullmq';
 import { QueryFailedError, Repository } from 'typeorm';
-import storageConfig from '../config/storage.config';
 import { ChannelsService } from '../channels/channels.service';
+import storageConfig from '../config/storage.config';
+import { VIDEO_PROCESSING_QUEUE } from '../queue/queue.module';
 import { StorageService } from '../storage/storage.service';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { InitUploadDto } from './dto/init-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import {
+  VideoInvalidStateTransitionException,
   VideoMimeTypeNotAcceptedException,
+  VideoNotFoundException,
+  VideoNotOwnedException,
   VideoSizeExceedsLimitException,
+  VideoUploadCompletionFailedException,
 } from './exceptions/video.exception';
 import { generatePublicId } from './public-id.util';
+import {
+  VIDEO_PROCESSING_JOB_NAME,
+  type VideoProcessingJobPayload,
+} from './video-processing.job';
 
 const PG_UNIQUE_VIOLATION = '23505';
 const PUBLIC_ID_COLUMN = 'public_id';
@@ -51,6 +62,8 @@ export class VideosService {
     private readonly storageService: StorageService,
     @Inject(storageConfig.KEY)
     private readonly config: ConfigType<typeof storageConfig>,
+    @InjectQueue(VIDEO_PROCESSING_QUEUE)
+    private readonly videoProcessingQueue: Queue<VideoProcessingJobPayload>,
   ) {}
 
   async initUpload(
@@ -94,6 +107,86 @@ export class VideosService {
       part_size_bytes: partSizeBytes,
       parts,
     };
+  }
+
+  async completeUpload(
+    userId: string,
+    publicId: string,
+    dto: CompleteUploadDto,
+  ): Promise<{ public_id: string; status: string }> {
+    const video = await this.findOwnedVideoOrThrow(userId, publicId);
+
+    if (video.status !== VideoStatus.UPLOADING) {
+      throw new VideoInvalidStateTransitionException();
+    }
+
+    try {
+      await this.storageService.completeMultipartUpload(
+        video.storage_key,
+        video.upload_id as string,
+        dto.parts.map((p) => ({ ETag: p.etag, PartNumber: p.part_number })),
+      );
+    } catch {
+      throw new VideoUploadCompletionFailedException();
+    }
+
+    const head = await this.storageService.headObject(video.storage_key);
+    if ((head.ContentLength ?? 0) > this.config.uploadMaxSizeBytes) {
+      await this.storageService.deleteObject(video.storage_key);
+      video.status = VideoStatus.FAILED;
+      video.upload_id = null;
+      video.processing_error = 'Stored object exceeds the allowed size limit';
+      await this.videoRepository.save(video);
+      throw new VideoSizeExceedsLimitException();
+    }
+
+    video.status = VideoStatus.PROCESSING;
+    video.upload_id = null;
+    await this.videoRepository.save(video);
+
+    await this.videoProcessingQueue.add(VIDEO_PROCESSING_JOB_NAME, {
+      videoId: video.id,
+      publicId: video.public_id,
+      storageKey: video.storage_key,
+    });
+
+    return { public_id: video.public_id, status: video.status };
+  }
+
+  async abortUpload(userId: string, publicId: string): Promise<void> {
+    const video = await this.findOwnedVideoOrThrow(userId, publicId);
+
+    if (video.status !== VideoStatus.UPLOADING) {
+      throw new VideoInvalidStateTransitionException();
+    }
+
+    await this.storageService.abortMultipartUpload(
+      video.storage_key,
+      video.upload_id as string,
+    );
+
+    video.status = VideoStatus.DRAFT;
+    video.upload_id = null;
+    await this.videoRepository.save(video);
+  }
+
+  private async findOwnedVideoOrThrow(
+    userId: string,
+    publicId: string,
+  ): Promise<Video> {
+    const video = await this.videoRepository.findOne({
+      where: { public_id: publicId },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel || channel.id !== video.channel_id) {
+      throw new VideoNotOwnedException();
+    }
+
+    return video;
   }
 
   private async createDraftRowWithRetry(

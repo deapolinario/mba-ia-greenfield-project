@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/11 completed
+**SIs:** 6/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -46,9 +46,14 @@
   - `videos.module.integration-spec.ts` (da SI-03.3) ficou desatualizado nesta SI porque `VideosModule` passou a importar `StorageModule`/`ChannelsModule` — ajustado para registrar `ConfigModule` com `storageConfig` no teste.
 
 ### SI-03.6 — `POST /complete` e `DELETE /upload`: verificação da conclusão e enfileiramento
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 36 passing (9 unit + 6 integration novos, 7 e2e novos)
+- **Observations:**
+  - `POST /:publicId/complete` precisou de `@HttpCode(HttpStatus.OK)` explícito — por default o NestJS responde `201` para `@Post()`, mas o contrato exige `200`.
+  - Teste de "tamanho real excede o teto" não aloca um payload de 10 GiB real (inviável em teste). Em vez disso: no teste de integração, construí uma segunda instância de `VideosService` com as mesmas dependências reais (repo/channels/storage/queue) do módulo compilado, mas com um `config` cujo `uploadMaxSizeBytes` é artificialmente pequeno — permite que um PUT real de poucos bytes dispare genuinamente a checagem de `HeadObject`. No e2e, usei `.overrideProvider(storageConfig.KEY)` no `Test.createTestingModule` para baixar o teto só nesse arquivo de teste (51200 bytes), mantendo o `.env` real (10 GiB) intocado para produção e para o e2e de SI-03.5.
+  - `VideosService` ganhou `@InjectQueue(VIDEO_PROCESSING_QUEUE)` — `VideosModule` passou a importar `QueueModule` (já registrado globalmente via `AppModule`, mas precisa estar nos imports de `VideosModule` para o provider da fila ficar visível no escopo de injeção do `VideosService`).
+  - `findOwnedVideoOrThrow` centraliza a dupla guarda (404 `VIDEO_NOT_FOUND` antes de 403 `VIDEO_NOT_OWNED`) reaproveitada por `completeUpload` e `abortUpload`.
+  - `VIDEO_UPLOAD_COMPLETION_FAILED` (502, do Error Catalog) implementado com teste unitário próprio, mesmo não estando entre as 7 ACs explícitas desta SI — é a mesma operação (`completeMultipartUpload`) e o catch já existia por exigência das regras de tratamento de erro do projeto (nunca engolir exceção).
 
 ### SI-03.7 — Bootstrap do container do worker e registro do processor
 - **Status:** pending
