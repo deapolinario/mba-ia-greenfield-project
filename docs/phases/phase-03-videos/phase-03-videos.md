@@ -55,7 +55,7 @@ Deliver large-file video upload that never routes bytes through the API (presign
 
 1. Adicionar serviço `redis` ao `nestjs-project/compose.yaml` — `redis:8-alpine`, healthcheck `redis-cli ping`; `nestjs-api` passa a depender dele com `condition: service_healthy` (per `phase-03-videos/TD-01`)
 2. Adicionar serviço `minio` — `minio/minio`, portas `9000` (API) e `9001` (console), volume nomeado, healthcheck no endpoint de health; credenciais via env
-3. Adicionar serviço one-shot `minio-bootstrap` — `minio/mc`, cria o bucket de `S3_BUCKET` idempotentemente e aplica a lifecycle rule com a ação `AbortIncompleteMultipartUpload` para expirar uploads multipart incompletos (mitigação citada em `phase-03-videos/TD-03`)
+3. Adicionar serviço one-shot `minio-bootstrap` — cria o bucket de `S3_BUCKET` idempotentemente. A lifecycle rule `AbortIncompleteMultipartUpload` citada em `phase-03-videos/TD-03` não é aplicável neste ambiente: o servidor MinIO rejeita essa ação de lifecycle (confirmado via `mc` e via chamada direta à API S3 com `aws-cli` — limitação do servidor, não das ferramentas cliente; [minio/minio#16120](https://github.com/minio/minio/issues/16120)). A limpeza de uploads abandonados fica a cargo exclusivo do reaper em nível de aplicação (SI-03.11)
 4. Instalar `ffmpeg` (que fornece `ffmpeg` e `ffprobe`) na imagem usada pelo worker em `Dockerfile.dev` (per `phase-03-videos/TD-07`)
 5. Adicionar serviço `video-worker` — mesmo build e mesmo volume de código da API, sem porta publicada, dependendo de `db`, `redis` e `minio` saudáveis (per `phase-03-videos/TD-06`)
 
@@ -68,7 +68,6 @@ Deliver large-file video upload that never routes bytes through the API (presign
 - `docker compose up -d` sobe `nestjs-api`, `db`, `mailpit`, `redis`, `minio` e `video-worker`, e `docker compose ps` mostra todos em `running`
 - `docker compose exec redis redis-cli ping` responde `PONG`
 - O bucket configurado em `S3_BUCKET` existe após o `minio-bootstrap` rodar, e rodar o bootstrap uma segunda vez não falha
-- A lifecycle rule de `AbortIncompleteMultipartUpload` está aplicada ao bucket
 - `docker compose exec video-worker ffprobe -version` e `ffmpeg -version` respondem com a versão instalada
 
 ---
