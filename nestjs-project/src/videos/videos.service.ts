@@ -16,6 +16,7 @@ import {
   VideoMimeTypeNotAcceptedException,
   VideoNotFoundException,
   VideoNotOwnedException,
+  VideoNotReadyException,
   VideoSizeExceedsLimitException,
   VideoUploadCompletionFailedException,
 } from './exceptions/video.exception';
@@ -185,6 +186,22 @@ export class VideosService {
       processing_error: video.processing_error,
       created_at: video.created_at,
     };
+  }
+
+  async buildStreamUrl(userId: string, publicId: string): Promise<string> {
+    const video = await this.findOwnedVideoOrThrow(userId, publicId);
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return this.storageService.presignGet(video.storage_key);
+  }
+
+  async buildDownloadUrl(userId: string, publicId: string): Promise<string> {
+    const video = await this.findOwnedVideoOrThrow(userId, publicId);
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return this.storageService.presignGet(video.storage_key, 'attachment');
   }
 
   async abortUpload(userId: string, publicId: string): Promise<void> {

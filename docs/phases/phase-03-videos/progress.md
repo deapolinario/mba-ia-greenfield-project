@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/11 completed
+**SIs:** 10/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -84,9 +84,12 @@
   - Teste e2e do caminho `ready` sobe um JPEG real (poucos bytes) no MinIO e busca a `thumbnail_url` retornada via `fetch` real, confirmando `Content-Type: image/*` — não apenas que a URL tem formato de string.
 
 ### SI-03.10 — Streaming e download: redirect para URL pré-assinada
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 21 passing (8 unit + 2 integration contra MinIO real + 7 e2e novos, incluindo expiração real de TTL)
+- **Observations:**
+  - `VideosController.stream`/`download` usam o decorator `@Redirect()` do NestJS (handler retorna `{ url, statusCode }`) em vez de manipular `@Res()` diretamente — mantém o fluxo normal de exceptions/filters intacto, já que a resposta só é montada depois que o service resolve ou lança.
+  - O teste e2e de expiração de TTL sobrescreve `presignDownloadTtlSeconds` via `.overrideProvider(storageConfig.KEY)` para 2 segundos só nesse arquivo de teste (não altera o `.env` real de 300s) e espera de verdade o tempo expirar — confirmando que o MinIO rejeita a URL com `403` sem qualquer envolvimento da API, exatamente como a AC exige.
+  - `buildStreamUrl`/`buildDownloadUrl` reaproveitam `findOwnedVideoOrThrow` (mesma guarda 404→403 das SIs anteriores) e só então checam `status === 'ready'` — nenhuma URL é pré-assinada antes dessas duas guardas passarem, confirmado nos testes unitários via `expect(storageService.presignGet).not.toHaveBeenCalled()`.
 
 ### SI-03.11 — Reaper de uploads abandonados
 - **Status:** pending

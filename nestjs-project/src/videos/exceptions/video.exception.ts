@@ -46,6 +46,16 @@ export class VideoInvalidStateTransitionException extends DomainException {
   }
 }
 
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_NOT_READY',
+      409,
+      'The video is not in the ready state and cannot be delivered',
+    );
+  }
+}
+
 export class VideoUploadCompletionFailedException extends DomainException {
   constructor() {
     super(

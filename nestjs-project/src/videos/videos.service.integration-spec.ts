@@ -464,3 +464,103 @@ describe('VideosService.findByPublicIdForOwner (integration)', () => {
     ).rejects.toBeInstanceOf(VideoNotFoundException);
   });
 });
+
+describe('VideosService.buildStreamUrl / buildDownloadUrl (integration)', () => {
+  let moduleRef: TestingModule;
+  let service: VideosService;
+  let storageService: StorageService;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [storageConfig, queueConfig],
+        }),
+        TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
+        VideosModule,
+      ],
+    }).compile();
+
+    service = moduleRef.get(VideosService);
+    storageService = moduleRef.get(StorageService);
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await dataSource.query('DELETE FROM "videos"');
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createReadyVideo(): Promise<{ userId: string; video: Video }> {
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `viddelivery_${++counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    const channel = await channelRepository.save(
+      channelRepository.create({
+        name: 'Channel',
+        nickname: `viddelivery${counter}`,
+        user_id: user.id,
+      }),
+    );
+    const publicId = `dl${counter}${Date.now() % 100000}`;
+    const storageKey = storageService.buildStorageKey(publicId);
+    await storageService.putObject(
+      storageKey,
+      Buffer.alloc(2048, 'a'),
+      'video/mp4',
+    );
+    const video = await videoRepository.save(
+      videoRepository.create({
+        public_id: publicId,
+        channel_id: channel.id,
+        title: 'Video',
+        status: VideoStatus.READY,
+        storage_key: storageKey,
+      }),
+    );
+    return { userId: user.id, video };
+  }
+
+  it('issues a stream URL that serves the object and honours Range with 206', async () => {
+    const { userId, video } = await createReadyVideo();
+
+    const url = await service.buildStreamUrl(userId, video.public_id);
+
+    const fullRes = await fetch(url);
+    expect(fullRes.status).toBe(200);
+    const fullBody = await fullRes.arrayBuffer();
+    expect(fullBody.byteLength).toBe(2048);
+
+    const rangeRes = await fetch(url, { headers: { Range: 'bytes=0-1023' } });
+    expect(rangeRes.status).toBe(206);
+    expect(rangeRes.headers.get('content-range')).toBeTruthy();
+    const rangeBody = await rangeRes.arrayBuffer();
+    expect(rangeBody.byteLength).toBe(1024);
+  }, 15000);
+
+  it('issues a download URL carrying the attachment disposition', async () => {
+    const { userId, video } = await createReadyVideo();
+
+    const url = await service.buildDownloadUrl(userId, video.public_id);
+
+    const res = await fetch(url);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment/);
+  }, 15000);
+});

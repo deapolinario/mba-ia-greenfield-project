@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -204,5 +205,85 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<VideoReadResult> {
     return this.videosService.findByPublicIdForOwner(user.sub, publicId);
+  }
+
+  @Get(':publicId/stream')
+  @Redirect()
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Stream a video',
+    description:
+      'Authorizes the request and redirects to a short-lived presigned GET URL; the storage serves the bytes and implements HTTP Range/206 natively.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned GET URL',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The authenticated user does not own this video',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'No video matches the given public id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'The video is not in the ready state',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async stream(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<{ url: string; statusCode: number }> {
+    const url = await this.videosService.buildStreamUrl(user.sub, publicId);
+    return { url, statusCode: HttpStatus.FOUND };
+  }
+
+  @Get(':publicId/download')
+  @Redirect()
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Download a video',
+    description:
+      'Same authorization and redirect mechanism as /stream, with the presigned URL signed with a response-content-disposition override of attachment.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to a presigned GET URL signed for attachment',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The authenticated user does not own this video',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'No video matches the given public id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'The video is not in the ready state',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async download(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<{ url: string; statusCode: number }> {
+    const url = await this.videosService.buildDownloadUrl(user.sub, publicId);
+    return { url, statusCode: HttpStatus.FOUND };
   }
 }

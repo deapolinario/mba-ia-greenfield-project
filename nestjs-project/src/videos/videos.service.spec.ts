@@ -5,6 +5,7 @@ import {
   VideoMimeTypeNotAcceptedException,
   VideoNotFoundException,
   VideoNotOwnedException,
+  VideoNotReadyException,
   VideoSizeExceedsLimitException,
   VideoUploadCompletionFailedException,
 } from './exceptions/video.exception';
@@ -41,6 +42,7 @@ function makeDeps() {
     completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
     headObject: jest.fn().mockResolvedValue({ ContentLength: 1024 }),
     deleteObject: jest.fn(),
+    presignGet: jest.fn().mockResolvedValue('https://signed-get-url'),
   };
   const videoProcessingQueue = {
     add: jest.fn(),
@@ -445,5 +447,129 @@ describe('VideosService.abortUpload', () => {
     await expect(
       service.abortUpload('user-1', 'abc12345678'),
     ).rejects.toBeInstanceOf(VideoInvalidStateTransitionException);
+  });
+});
+
+describe('VideosService.buildStreamUrl / buildDownloadUrl', () => {
+  it('rejects a non-owner before presigning anything', async () => {
+    const {
+      videoRepository,
+      channelsService,
+      storageService,
+      videoProcessingQueue,
+    } = makeDeps();
+    videoRepository.findOne.mockResolvedValue(
+      makeVideo({ status: VideoStatus.READY }),
+    );
+    channelsService.findByUserId.mockResolvedValue({ id: 'other-channel' });
+    const service = new VideosService(
+      videoRepository as any,
+      channelsService as any,
+      storageService as any,
+      CONFIG as any,
+      videoProcessingQueue as any,
+    );
+
+    await expect(
+      service.buildStreamUrl('user-2', 'abc12345678'),
+    ).rejects.toBeInstanceOf(VideoNotOwnedException);
+    expect(storageService.presignGet).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown public id before presigning anything', async () => {
+    const {
+      videoRepository,
+      channelsService,
+      storageService,
+      videoProcessingQueue,
+    } = makeDeps();
+    videoRepository.findOne.mockResolvedValue(null);
+    const service = new VideosService(
+      videoRepository as any,
+      channelsService as any,
+      storageService as any,
+      CONFIG as any,
+      videoProcessingQueue as any,
+    );
+
+    await expect(
+      service.buildDownloadUrl('user-1', 'nonexistent0'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+    expect(storageService.presignGet).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    VideoStatus.DRAFT,
+    VideoStatus.UPLOADING,
+    VideoStatus.PROCESSING,
+    VideoStatus.FAILED,
+  ])('rejects buildStreamUrl when status is %s', async (status) => {
+    const {
+      videoRepository,
+      channelsService,
+      storageService,
+      videoProcessingQueue,
+    } = makeDeps();
+    videoRepository.findOne.mockResolvedValue(makeVideo({ status }));
+    const service = new VideosService(
+      videoRepository as any,
+      channelsService as any,
+      storageService as any,
+      CONFIG as any,
+      videoProcessingQueue as any,
+    );
+
+    await expect(
+      service.buildStreamUrl('user-1', 'abc12345678'),
+    ).rejects.toBeInstanceOf(VideoNotReadyException);
+    expect(storageService.presignGet).not.toHaveBeenCalled();
+  });
+
+  it('presigns a plain GET for stream when ready', async () => {
+    const {
+      videoRepository,
+      channelsService,
+      storageService,
+      videoProcessingQueue,
+    } = makeDeps();
+    const video = makeVideo({ status: VideoStatus.READY });
+    videoRepository.findOne.mockResolvedValue(video);
+    const service = new VideosService(
+      videoRepository as any,
+      channelsService as any,
+      storageService as any,
+      CONFIG as any,
+      videoProcessingQueue as any,
+    );
+
+    const url = await service.buildStreamUrl('user-1', 'abc12345678');
+
+    expect(url).toBe('https://signed-get-url');
+    expect(storageService.presignGet).toHaveBeenCalledWith(video.storage_key);
+  });
+
+  it('presigns a GET with the attachment disposition override for download', async () => {
+    const {
+      videoRepository,
+      channelsService,
+      storageService,
+      videoProcessingQueue,
+    } = makeDeps();
+    const video = makeVideo({ status: VideoStatus.READY });
+    videoRepository.findOne.mockResolvedValue(video);
+    const service = new VideosService(
+      videoRepository as any,
+      channelsService as any,
+      storageService as any,
+      CONFIG as any,
+      videoProcessingQueue as any,
+    );
+
+    await service.buildDownloadUrl('user-1', 'abc12345678');
+
+    expect(storageService.presignGet).toHaveBeenCalledWith(
+      video.storage_key,
+      'attachment',
+    );
   });
 });
