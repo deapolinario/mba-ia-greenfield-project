@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/11 completed
+**SIs:** 7/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -56,9 +56,13 @@
   - `VIDEO_UPLOAD_COMPLETION_FAILED` (502, do Error Catalog) implementado com teste unitário próprio, mesmo não estando entre as 7 ACs explícitas desta SI — é a mesma operação (`completeMultipartUpload`) e o catch já existia por exigência das regras de tratamento de erro do projeto (nunca engolir exceção).
 
 ### SI-03.7 — Bootstrap do container do worker e registro do processor
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 2 passing (integration)
+- **Observations:**
+  - `WorkerModule` precisou registrar `Channel` e `User` em `TypeOrmModule.forFeature` além de `Video` — `autoLoadEntities: true` só carrega entidades já registradas via `forFeature` **dentro da mesma árvore de módulos**, e o `WorkerModule` é uma árvore de DI inteiramente separada da `AppModule`. Sem isso, o builder de metadados do TypeORM falhava ao resolver a relação `Video → Channel → User` com "Entity metadata ... was not found", e o módulo nunca inicializava (todas as tentativas de conexão falhavam e o teste travava indefinidamente em retry).
+  - O processor (`VideoProcessingProcessor.process`) é deliberadamente um stub nesta SI — apenas loga o recebimento do job. O processamento real (ffprobe, thumbnail, transições de status) é escopo da SI-03.8; implementá-lo aqui violaria o limite da SI.
+  - As 4 ACs desta SI são majoritariamente operacionais (logs do container, comportamento do BullMQ sob falha), não unitárias — a tabela de Tests do plano lista só o teste de `WorkerModule`. Verifiquei as 3 primeiras ACs manualmente: subi o `video-worker` via `docker compose up`, confirmei nos logs que o contexto da aplicação inicia sem nenhum log de servidor HTTP escutando, enfileirei um job manualmente via um script `node -e` usando `bullmq` diretamente contra o Redis do Compose, e confirmei via `getJobCounts` que o job foi consumido e marcado `completed`. A 4ª AC (job volta para `waiting` ao parar o worker em andamento) é uma garantia estrutural do mecanismo de lock do BullMQ, já documentado em `library-refs.md` — não é um comportamento desta implementação específica para re-verificar manualmente.
+  - Adicionado `start:worker` ao `package.json` (`nest start --entryFile worker/main.worker --watch`) e o `command` do serviço `video-worker` no Compose passou a rodá-lo (antes ficava ocioso em `tail -f /dev/null`, herdado do `Dockerfile.dev`).
 
 ### SI-03.8 — Processamento FFmpeg: metadados, thumbnail e transições de status
 - **Status:** pending
