@@ -43,6 +43,17 @@ export interface InitUploadResult {
   parts: InitUploadPart[];
 }
 
+export interface VideoReadResult {
+  public_id: string;
+  title: string;
+  status: string;
+  duration_seconds: number | null;
+  metadata: Video['metadata'];
+  thumbnail_url: string | null;
+  processing_error: string | null;
+  created_at: Date;
+}
+
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
   const e = err as unknown as { code?: string; detail?: string };
@@ -151,6 +162,29 @@ export class VideosService {
     });
 
     return { public_id: video.public_id, status: video.status };
+  }
+
+  async findByPublicIdForOwner(
+    userId: string,
+    publicId: string,
+  ): Promise<VideoReadResult> {
+    const video = await this.findOwnedVideoOrThrow(userId, publicId);
+
+    const thumbnailUrl =
+      video.status === VideoStatus.READY && video.thumbnail_key
+        ? await this.storageService.presignGet(video.thumbnail_key)
+        : null;
+
+    return {
+      public_id: video.public_id,
+      title: video.title,
+      status: video.status,
+      duration_seconds: video.duration_seconds,
+      metadata: video.metadata,
+      thumbnail_url: thumbnailUrl,
+      processing_error: video.processing_error,
+      created_at: video.created_at,
+    };
   }
 
   async abortUpload(userId: string, publicId: string): Promise<void> {

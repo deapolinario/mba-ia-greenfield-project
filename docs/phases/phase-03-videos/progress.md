@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/11 completed
+**SIs:** 9/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -76,9 +76,12 @@
   - `VideoProcessingService.process` recebe o `Job` inteiro (não só o payload) porque precisa de `job.attemptsMade`/`job.opts.attempts` para decidir se é a tentativa final — isso é lido, nunca persistido em coluna, conforme TD-10.
 
 ### SI-03.9 — `GET /videos/:publicId`: leitura do estado do vídeo
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 13 passing (6 integration novos de `findByPublicIdForOwner`, 7 e2e novos)
+- **Observations:**
+  - `thumbnail_url` só é pré-assinado quando `status === 'ready'` e `thumbnail_key` está presente — nos demais estados (incluindo `failed`, onde `thumbnail_key` já é nulo por construção da SI-03.8) a resposta expõe `null`, satisfazendo as ACs sem lógica extra.
+  - `findByPublicIdForOwner` reaproveita o helper privado `findOwnedVideoOrThrow` já existente (SI-03.6), que já fazia a dupla guarda 404→403 — nenhuma duplicação de lógica de autorização.
+  - Teste e2e do caminho `ready` sobe um JPEG real (poucos bytes) no MinIO e busca a `thumbnail_url` retornada via `fetch` real, confirmando `Content-Type: image/*` — não apenas que a URL tem formato de string.
 
 ### SI-03.10 — Streaming e download: redirect para URL pré-assinada
 - **Status:** pending

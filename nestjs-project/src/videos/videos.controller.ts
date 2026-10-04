@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -19,7 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/auth.types';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { InitUploadDto } from './dto/init-upload.dto';
-import type { InitUploadResult } from './videos.service';
+import type { InitUploadResult, VideoReadResult } from './videos.service';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -158,5 +159,50 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<void> {
     return this.videosService.abortUpload(user.sub, publicId);
+  }
+
+  @Get(':publicId')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Read a video',
+    description:
+      "Returns the video's current state — how a client observes the processing → ready | failed transition.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video state',
+    schema: {
+      properties: {
+        public_id: { type: 'string' },
+        title: { type: 'string' },
+        status: { type: 'string' },
+        duration_seconds: { type: 'number', nullable: true },
+        metadata: { type: 'object', nullable: true },
+        thumbnail_url: { type: 'string', nullable: true },
+        processing_error: { type: 'string', nullable: true },
+        created_at: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'The authenticated user does not own this video',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'No video matches the given public id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async findOne(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<VideoReadResult> {
+    return this.videosService.findByPublicIdForOwner(user.sub, publicId);
   }
 }

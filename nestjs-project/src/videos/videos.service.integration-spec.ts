@@ -20,6 +20,10 @@ import {
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from './entities/video.entity';
+import {
+  VideoNotFoundException,
+  VideoNotOwnedException,
+} from './exceptions/video.exception';
 import { VideosModule } from './videos.module';
 import { VideosService } from './videos.service';
 import type { InitUploadResult } from './videos.service';
@@ -288,4 +292,175 @@ describe('VideosService.completeUpload / abortUpload (integration)', () => {
       false,
     );
   }, 30000);
+});
+
+describe('VideosService.findByPublicIdForOwner (integration)', () => {
+  let moduleRef: TestingModule;
+  let service: VideosService;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [storageConfig, queueConfig],
+        }),
+        TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
+        VideosModule,
+      ],
+    }).compile();
+
+    service = moduleRef.get(VideosService);
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await dataSource.query('DELETE FROM "videos"');
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createUserWithChannel(): Promise<{
+    userId: string;
+    channelId: string;
+  }> {
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `vidread_${++counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    const channel = await channelRepository.save(
+      channelRepository.create({
+        name: 'Channel',
+        nickname: `vidread${counter}`,
+        user_id: user.id,
+      }),
+    );
+    return { userId: user.id, channelId: channel.id };
+  }
+
+  async function seedVideo(
+    channelId: string,
+    overrides: Partial<Video> = {},
+  ): Promise<Video> {
+    const publicId = `rd${counter}${Date.now() % 100000}`;
+    return videoRepository.save(
+      videoRepository.create({
+        public_id: publicId,
+        channel_id: channelId,
+        title: 'Seeded video',
+        status: VideoStatus.PROCESSING,
+        storage_key: `videos/${publicId}/original`,
+        ...overrides,
+      }),
+    );
+  }
+
+  it('returns the video owned by the authenticated channel', async () => {
+    const { userId, channelId } = await createUserWithChannel();
+    const video = await seedVideo(channelId);
+
+    const result = await service.findByPublicIdForOwner(
+      userId,
+      video.public_id,
+    );
+
+    expect(result.public_id).toBe(video.public_id);
+    expect(result.title).toBe('Seeded video');
+    expect(result.status).toBe(VideoStatus.PROCESSING);
+  });
+
+  it('nulls duration, metadata and thumbnail_url while processing', async () => {
+    const { userId, channelId } = await createUserWithChannel();
+    const video = await seedVideo(channelId, {
+      status: VideoStatus.PROCESSING,
+    });
+
+    const result = await service.findByPublicIdForOwner(
+      userId,
+      video.public_id,
+    );
+
+    expect(result.duration_seconds).toBeNull();
+    expect(result.metadata).toBeNull();
+    expect(result.thumbnail_url).toBeNull();
+  });
+
+  it('exposes metadata and a presigned thumbnail_url when ready', async () => {
+    const { userId, channelId } = await createUserWithChannel();
+    const video = await seedVideo(channelId, {
+      status: VideoStatus.READY,
+      duration_seconds: 42,
+      metadata: {
+        width: 1920,
+        height: 1080,
+        video_codec: 'h264',
+        audio_codec: 'aac',
+        container: 'mov,mp4,m4a,3gp,3g2,mj2',
+        bitrate: 4500000,
+        framerate: 30,
+        size_bytes: 1024,
+      },
+      thumbnail_key: `videos/placeholder/thumbnail.jpg`,
+    });
+
+    const result = await service.findByPublicIdForOwner(
+      userId,
+      video.public_id,
+    );
+
+    expect(result.duration_seconds).toBe(42);
+    expect(result.metadata?.width).toBe(1920);
+    expect(typeof result.thumbnail_url).toBe('string');
+    expect(result.thumbnail_url).toBeTruthy();
+  });
+
+  it('exposes a non-null processing_error when failed, with other outputs null', async () => {
+    const { userId, channelId } = await createUserWithChannel();
+    const video = await seedVideo(channelId, {
+      status: VideoStatus.FAILED,
+      processing_error: 'ffprobe failed: no video stream',
+    });
+
+    const result = await service.findByPublicIdForOwner(
+      userId,
+      video.public_id,
+    );
+
+    expect(result.status).toBe(VideoStatus.FAILED);
+    expect(result.processing_error).toBe('ffprobe failed: no video stream');
+    expect(result.duration_seconds).toBeNull();
+    expect(result.metadata).toBeNull();
+    expect(result.thumbnail_url).toBeNull();
+  });
+
+  it('throws VideoNotOwned for a video belonging to another channel', async () => {
+    const owner = await createUserWithChannel();
+    const other = await createUserWithChannel();
+    const video = await seedVideo(owner.channelId);
+
+    await expect(
+      service.findByPublicIdForOwner(other.userId, video.public_id),
+    ).rejects.toBeInstanceOf(VideoNotOwnedException);
+  });
+
+  it('throws VideoNotFound for an unknown public id', async () => {
+    const { userId } = await createUserWithChannel();
+
+    await expect(
+      service.findByPublicIdForOwner(userId, 'nonexistent0'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+  });
 });
