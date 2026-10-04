@@ -26,6 +26,13 @@ export function createTestDataSource(
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
+  // videos references channels via FK but not every suite's DataSource
+  // includes the Video entity (so the table may not exist in that
+  // connection's synchronize pass) — guard with to_regclass so this
+  // stays order-independent across suites that share the test DB.
+  await dataSource.query(
+    `DO $$ BEGIN IF to_regclass('public.videos') IS NOT NULL THEN DELETE FROM "videos"; END IF; END $$;`,
+  );
   await dataSource.query('DELETE FROM "channels"');
   await dataSource.query('DELETE FROM "users"');
 }

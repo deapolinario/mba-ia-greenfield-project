@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/11 completed
+**SIs:** 3/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -20,9 +20,12 @@
   - `MINIO_BROWSER=on` precisou ser setado explicitamente — o default da imagem bitnami é `off`, o que deixaria o console (porta 9001) inacessível.
 
 ### SI-03.3 — Entidade `Video`, migration e `VideosModule`
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 10 passing
+- **Observations:**
+  - Fiz o merge de `feature/ajustes_testes` nesta branch antes de implementar esta SI — a branch não tinha o fix de isolamento de testes (banco `streamtube_test` dedicado), e a entidade `Video` usa um enum Postgres (`status`), o mesmo padrão que causou a flakiness original. Merge sem conflitos; suíte completa (156/156) rodou verde antes e depois.
+  - `cleanAllTables` em `create-test-data-source.ts` agora limpa `videos` antes de `channels` (FK), com guarda `to_regclass('public.videos') IS NOT NULL` — necessário porque nem toda suíte inclui a entidade `Video` no seu `DataSource` de teste, então a tabela pode não existir na conexão daquela suíte especifica mesmo existindo fisicamente no banco compartilhado.
+  - `migrations.integration-spec.ts` estendido para a terceira migration (`CreateVideos`): tabela esperada subiu de 4 para 5, `DROP TYPE IF EXISTS "videos_status_enum"` adicionado ao `beforeAll` pelo mesmo motivo do enum de `verification_tokens`.
 
 ### SI-03.4 — `StorageModule` e `QueueModule`: adaptadores de infraestrutura
 - **Status:** pending
