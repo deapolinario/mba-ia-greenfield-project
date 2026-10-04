@@ -89,6 +89,9 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"
+    ],
     "globalSetup": "<rootDir>/test/jest-global-setup.ts",
     "setupFiles": [
       "<rootDir>/test/jest-setup-env.ts"

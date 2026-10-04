@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/11 completed
+**SIs:** 4/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -28,9 +28,12 @@
   - `migrations.integration-spec.ts` estendido para a terceira migration (`CreateVideos`): tabela esperada subiu de 4 para 5, `DROP TYPE IF EXISTS "videos_status_enum"` adicionado ao `beforeAll` pelo mesmo motivo do enum de `verification_tokens`.
 
 ### SI-03.4 — `StorageModule` e `QueueModule`: adaptadores de infraestrutura
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7 passing
+- **Observations:**
+  - `@nestjs/bullmq` e `@nestjs/bull-shared` são ESM-only (`"type": "module"` no `package.json` deles), ao contrário do `bullmq` em si (CJS, conforme documentado no `library-refs.md`). O Jest falhava com `SyntaxError: Unexpected token 'export'` ao importar `@nestjs/bullmq`. Adicionado `transformIgnorePatterns: ["node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"]` em `package.json` (jest config) e `test/jest-e2e.json` para que o `ts-jest` transforme esses dois pacotes em vez de ignorá-los.
+  - `ListMultipartUploadsCommand` do MinIO retorna `Uploads: undefined` (não `[]`) quando não há nenhum multipart upload em andamento — o teste de `abortMultipartUpload` precisou normalizar com `?? []` antes do `.some()`.
+  - `StorageService` expõe os construtores de chave (`buildStorageKey`/`buildThumbnailKey`) como métodos da própria service, não como constantes separadas — são determinísticos mas dependem do `publicId` em runtime, então não cabem em `*.constants.ts`.
 
 ### SI-03.5 — `POST /videos`: início do upload com pré-cadastro do rascunho e partes pré-assinadas
 - **Status:** pending
