@@ -31,12 +31,19 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
+    // Sequential, not Promise.all: dropping the enum type must happen after
+    // every table that references it is gone, otherwise it races across
+    // pooled connections. DROP TABLE ... CASCADE does not remove the enum
+    // TYPE it backs, so it's dropped explicitly too — otherwise a rerun
+    // against the same (persistent) database fails on CREATE TYPE with
+    // "already exists".
+    for (const table of MANAGED_TABLES) {
+      await dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);
+    }
+    await dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`);
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "verification_tokens_type_enum"`,
+    );
   });
 
   afterAll(async () => {
