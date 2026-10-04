@@ -10,7 +10,9 @@ import { QueueModule } from '../queue/queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { User } from '../users/entities/user.entity';
 import { Video } from '../videos/entities/video.entity';
+import { FfmpegService } from '../videos/ffmpeg.service';
 import { VideoProcessingProcessor } from '../videos/video-processing.processor';
+import { VideoProcessingService } from '../videos/video-processing.service';
 
 @Module({
   imports: [
@@ -38,6 +40,6 @@ import { VideoProcessingProcessor } from '../videos/video-processing.processor';
     StorageModule,
     QueueModule,
   ],
-  providers: [VideoProcessingProcessor],
+  providers: [VideoProcessingProcessor, VideoProcessingService, FfmpegService],
 })
 export class WorkerModule {}

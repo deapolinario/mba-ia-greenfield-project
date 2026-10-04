@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/11 completed
+**SIs:** 8/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -65,9 +65,15 @@
   - Adicionado `start:worker` ao `package.json` (`nest start --entryFile worker/main.worker --watch`) e o `command` do serviço `video-worker` no Compose passou a rodá-lo (antes ficava ocioso em `tail -f /dev/null`, herdado do `Dockerfile.dev`).
 
 ### SI-03.8 — Processamento FFmpeg: metadados, thumbnail e transições de status
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 16 passing (6 unit + 2 integration de FfmpegService com binários reais + 4 integration de VideoProcessingService contra MinIO/Postgres reais, mais 4 outros ajustes de limpeza)
+- **Observations:**
+  - `FfmpegService.probe`/`generateThumbnail` recebem a URL de origem via `storageService.presignGet` em vez de baixar o arquivo para disco — confirmei manualmente que `ffprobe`/`ffmpeg` desta imagem (`--enable-https`, `--enable-gnutls`) leem direto de uma URL HTTP(S) presignada do MinIO. Isso evita bufferizar arquivos de até 10 GiB no disco do worker; só o thumbnail (poucos KB) é materializado localmente antes do upload.
+  - Nenhum fixture binário foi commitado ao repo. Os testes de integração geram um vídeo sintético curto on-the-fly com o próprio `ffmpeg` (`color=black` 1s concatenado com `testsrc` 1s, h264/aac/mp4) — isso também permite a AC "thumbnail não é frame preto" ser verificada de forma determinística (o primeiro frame real é preto; o filtro `thumbnail` deve escolher o segundo). Verifiquei via `ffmpeg -vf signalstats` que o thumbnail gerado tem luma média (YAVG) bem acima de zero, confirmando que não é o frame preto.
+  - A checagem container-vs-MIME (`container-mime.util.ts`) reconhece que `video/mp4`↔`video/quicktime` compartilham o mesmo `format_name` do ffprobe (ambos ISO BMFF) e `video/webm`↔`video/x-matroska` idem (WebM é um perfil do Matroska) — não é uma aproximação, é a relação real entre esses containers; uma checagem 1:1 ingênua teria falsos positivos de "mismatch" para arquivos legítimos.
+  - Descoberta corrigida nesta SI: `QueueModule` nunca configurava `attempts`/`backoff` no `BullModule.forRootAsync` (`defaultJobOptions`), apesar do Events/Messages do plano já descrever esse comportamento desde a SI-03.6. Sem isso, `job.opts.attempts` seria `undefined` e a lógica de "só falha definitivamente na última tentativa" desta SI não teria base para funcionar. Adicionado `defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5000 } }`.
+  - Tentei verificar a AC "concluído um upload válido, o vídeo chega a ready sem intervenção manual" manualmente via `docker compose up` + chamadas HTTP reais, mas o banco de dev (`streamtube`) tem as tabelas `channels`/`users` órfãs de antes da introdução de migrations (criadas via `synchronize`, sem entrada correspondente na tabela `migrations`) — `npm run migration:run` falha com "relation already exists". Isso é débito pré-existente, não relacionado a esta SI (nunca rodei `migration:run` contra o banco de dev real nas SIs anteriores, só contra o banco de teste isolado). Não tentei corrigir — dropar tabelas de um banco de dev persistente não é uma decisão para tomar sem o usuário. O teste de integração automatizado (`video-processing.service.integration-spec.ts`) já cobre a mesma AC com evidência mais forte, pois roda contra o schema gerado pelas migrations reais.
+  - `VideoProcessingService.process` recebe o `Job` inteiro (não só o payload) porque precisa de `job.attemptsMade`/`job.opts.attempts` para decidir se é a tentativa final — isso é lido, nunca persistido em coluna, conforme TD-10.
 
 ### SI-03.9 — `GET /videos/:publicId`: leitura do estado do vídeo
 - **Status:** pending
