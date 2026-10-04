@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/11 completed
+**SIs:** 5/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -36,9 +36,14 @@
   - `StorageService` expõe os construtores de chave (`buildStorageKey`/`buildThumbnailKey`) como métodos da própria service, não como constantes separadas — são determinísticos mas dependem do `publicId` em runtime, então não cabem em `*.constants.ts`.
 
 ### SI-03.5 — `POST /videos`: início do upload com pré-cadastro do rascunho e partes pré-assinadas
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 15 passing (4 unit + 2 integration + 4 e2e novos, mais 5 pré-existentes ajustados)
+- **Observations:**
+  - Adicionei `ChannelsService.findByUserId(userId)` (nova consulta de DB sem branching) para resolver o canal do usuário autenticado — exigiu injetar `Repository<Channel>` no construtor, o que quebrou a assinatura usada por 8 call sites de teste existentes (`channels.service.spec.ts`, `channels.service.integration-spec.ts`, `users.service.integration-spec.ts`); todos corrigidos para passar o segundo argumento.
+  - `npm run test:e2e` não tinha `--runInBand` no script (`package.json`), apesar do `CLAUDE.md` afirmar "already configured". Com um único arquivo e2e isso nunca import ava, mas ao adicionar `videos-upload-init.e2e-spec.ts` os workers paralelos do Jest passaram a colidir no mesmo banco de teste compartilhado (FK violations aleatórias em `channels`/`videos`, e um 409 esperado virando 201). Corrigido adicionando `--runInBand` ao script, conforme a regra do projeto — bug real, não só deste SI.
+  - O `@Max(10737418240)` inicialmente colocado no DTO (`size_bytes`) interceptava a validação antes da checagem de domínio do serviço, fazendo o teto de 10 GiB retornar `VALIDATION_ERROR` em vez de `VIDEO_SIZE_EXCEEDS_LIMIT` como o AC exige. Removido do DTO — o teto é checado exclusivamente em `VideosService` contra `uploadMaxSizeBytes`; o DTO só valida forma (`@IsInt`, `@Min(1)`).
+  - Os construtores de chave (`buildStorageKey`/`buildThumbnailKey`, da SI-03.4) e o `S3_CLIENT` provider continuam intocados; `VideosService` apenas os consome via `StorageModule` importado.
+  - `videos.module.integration-spec.ts` (da SI-03.3) ficou desatualizado nesta SI porque `VideosModule` passou a importar `StorageModule`/`ChannelsModule` — ajustado para registrar `ConfigModule` com `storageConfig` no teste.
 
 ### SI-03.6 — `POST /complete` e `DELETE /upload`: verificação da conclusão e enfileiramento
 - **Status:** pending
