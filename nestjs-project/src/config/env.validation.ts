@@ -36,4 +36,5 @@ export const envValidationSchema = Joi.object({
   UPLOAD_ACCEPTED_MIME_TYPES: Joi.string().default(
     'video/mp4,video/quicktime,video/webm,video/x-matroska',
   ),
+  ABANDONED_UPLOAD_CUTOFF_HOURS: Joi.number().default(24),
 });

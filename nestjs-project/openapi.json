@@ -438,6 +438,507 @@
           "auth"
         ]
       }
+    },
+    "/videos": {
+      "post": {
+        "description": "Validates the declared size and MIME type, pre-registers the video row, opens a multipart upload in storage, and returns presigned UploadPart URLs.",
+        "operationId": "VideosController_initUpload",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "public_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "uploading"
+                    },
+                    "upload_id": {
+                      "type": "string"
+                    },
+                    "part_size_bytes": {
+                      "type": "number"
+                    },
+                    "parts": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "part_number": {
+                            "type": "number"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed, size above limit, or MIME type rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Initiate a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}/complete": {
+      "post": {
+        "description": "Finalizes the multipart upload, verifies the stored object's real size, transitions the video to processing and enqueues the processing job.",
+        "operationId": "VideosController_completeUpload",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "public_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "processing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or stored object exceeds the size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated user does not own this video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No video matches the given public id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The video is not in the uploading state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Complete a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}/upload": {
+      "delete": {
+        "description": "Aborts an in-flight multipart upload, releasing the parts in storage, and returns the video to draft.",
+        "operationId": "VideosController_abortUpload",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Upload aborted"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated user does not own this video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No video matches the given public id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The video is not in the uploading state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Abort a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}": {
+      "get": {
+        "description": "Returns the video's current state — how a client observes the processing → ready | failed transition.",
+        "operationId": "VideosController_findOne",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "public_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "duration_seconds": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "thumbnail_url": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "processing_error": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated user does not own this video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No video matches the given public id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Read a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}/stream": {
+      "get": {
+        "description": "Authorizes the request and redirects to a short-lived presigned GET URL; the storage serves the bytes and implements HTTP Range/206 natively.",
+        "operationId": "VideosController_stream",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned GET URL"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated user does not own this video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No video matches the given public id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The video is not in the ready state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Stream a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}/download": {
+      "get": {
+        "description": "Same authorization and redirect mechanism as /stream, with the presigned URL signed with a response-content-disposition override of attachment.",
+        "operationId": "VideosController_download",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned GET URL signed for attachment"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated user does not own this video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No video matches the given public id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The video is not in the ready state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Download a video",
+        "tags": [
+          "videos"
+        ]
+      }
     }
   },
   "info": {
@@ -478,6 +979,14 @@
         "properties": {}
       },
       "ResetPasswordDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "InitUploadDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CompleteUploadDto": {
         "type": "object",
         "properties": {}
       },

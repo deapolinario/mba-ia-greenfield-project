@@ -9,6 +9,8 @@ import { Channel } from '../channels/entities/channel.entity';
 import { QueueModule } from '../queue/queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { User } from '../users/entities/user.entity';
+import { AbandonedUploadReaper } from '../videos/abandoned-upload.reaper';
+import { AbandonedUploadReaperScheduler } from '../videos/abandoned-upload-reaper.scheduler';
 import { Video } from '../videos/entities/video.entity';
 import { FfmpegService } from '../videos/ffmpeg.service';
 import { VideoProcessingProcessor } from '../videos/video-processing.processor';
@@ -40,6 +42,12 @@ import { VideoProcessingService } from '../videos/video-processing.service';
     StorageModule,
     QueueModule,
   ],
-  providers: [VideoProcessingProcessor, VideoProcessingService, FfmpegService],
+  providers: [
+    VideoProcessingProcessor,
+    VideoProcessingService,
+    FfmpegService,
+    AbandonedUploadReaper,
+    AbandonedUploadReaperScheduler,
+  ],
 })
 export class WorkerModule {}

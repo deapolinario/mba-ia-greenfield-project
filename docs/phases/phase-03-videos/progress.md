@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 10/11 completed
+**Status:** completed
+**SIs:** 11/11 completed
 
 ### SI-03.1 — Dependências, namespaces de configuração e validação de env
 - **Status:** completed
@@ -92,6 +92,11 @@
   - `buildStreamUrl`/`buildDownloadUrl` reaproveitam `findOwnedVideoOrThrow` (mesma guarda 404→403 das SIs anteriores) e só então checam `status === 'ready'` — nenhuma URL é pré-assinada antes dessas duas guardas passarem, confirmado nos testes unitários via `expect(storageService.presignGet).not.toHaveBeenCalled()`.
 
 ### SI-03.11 — Reaper de uploads abandonados
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 4 passing (integration, contra Postgres e MinIO reais)
+- **Observations:**
+  - Nenhuma biblioteca nova de agendamento foi introduzida (`@nestjs/schedule` não está instalado em nenhuma outra parte do projeto). O `AbandonedUploadReaperScheduler` usa um `setInterval` simples dentro do `WorkerModule` (hora em hora), chamando `AbandonedUploadReaper.run()` e logando falhas sem relançar — consistente com a excessão de tratamento de erro do projeto para contextos de background job/cron.
+  - `ABANDONED_UPLOAD_CUTOFF_HOURS` (default 24h) adicionado a `storage.config.ts`, ao schema Joi e a `.env`/`.env.example`, conforme a observação deixada na SI-03.1 de que esse campo pertencia a esta SI.
+  - Testes de integração precisaram de `UPDATE` SQL raw para "envelhecer" `updated_at` dos vídeos semeados — `@UpdateDateColumn()` do TypeORM sobrescreveria qualquer valor passado via `.save()` com o timestamp atual.
+  - Verifiquei operacionalmente que o `video-worker` sobe limpo com o novo scheduler registrado (sem erros de DI, sem exceptions no boot).
+  - Sem teste e2e — o reaper não expõe rota HTTP, conforme o plano.

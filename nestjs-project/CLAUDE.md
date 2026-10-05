@@ -149,6 +149,45 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
+## Video Upload, Processing & Delivery
+
+Videos go through a five-state lifecycle: `draft` → `uploading` → `processing` → `ready` | `failed`. `draft` means the row is pre-registered with no bytes in flight; `uploading` means a multipart upload is open. This split lets the abandoned-upload reaper target only genuinely stuck transfers.
+
+### API endpoints (`VideosController`, owner-only — authenticated user must own the video's channel)
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /videos` | Validates declared size/MIME against the admission policy, pre-registers the row, opens a multipart upload, returns presigned `UploadPart` URLs |
+| `POST /videos/:publicId/complete` | Finalizes the multipart upload, verifies the real object size via `HeadObject`, transitions to `processing`, enqueues the processing job |
+| `DELETE /videos/:publicId/upload` | Aborts an in-flight upload, releases the parts, returns the video to `draft` |
+| `GET /videos/:publicId` | Reads the video's current state — the only way to observe `processing → ready | failed` from outside |
+| `GET /videos/:publicId/stream` | `302` redirect to a presigned GET URL; MinIO/S3 serve `Range`/`206` natively |
+| `GET /videos/:publicId/download` | Same as `/stream`, with a `response-content-disposition: attachment` override |
+
+No video bytes ever cross the API — the client PUTs parts directly to storage using the presigned URLs, and reads bytes directly from storage via the redirect.
+
+### Queue and worker
+
+`BullMQ` on Redis (`QueueModule`, queue name `video-processing`) connects the API (producer, in `VideosService.completeUpload`) to a **separate worker process** (`WorkerModule`, bootstrapped via `NestFactory.createApplicationContext` — no HTTP listener, no controllers). Run it with `npm run start:worker`; the `video-worker` Compose service runs this by default. `VideoProcessingProcessor` (`@Processor('video-processing')`, `concurrency: 2`) delegates to `VideoProcessingService`, which:
+
+1. Resolves the source object via a presigned GET URL (never downloads the full file to disk)
+2. Extracts duration/metadata with `FfmpegService.probe` (`ffprobe`, direct `child_process.spawn`)
+3. Re-verifies the real container against `declared_mime_type` — a mismatch fails the video
+4. Generates a 1280px-wide JPEG thumbnail with the `thumbnail` filter (`FfmpegService.generateThumbnail`) and uploads it to `videos/{publicId}/thumbnail.jpg`
+5. Writes `duration_seconds`, `metadata`, `thumbnail_key`, transitions to `ready`
+
+Retries are owned by the queue (`defaultJobOptions: { attempts: 3, backoff: exponential }` in `QueueModule`) — only on the final attempt does the service write `status = 'failed'` with `processing_error`; the attempt count itself is never mirrored into a column.
+
+### Storage
+
+`StorageModule` wraps the AWS SDK v3 `S3Client` (pointed at MinIO locally via `S3_ENDPOINT` + `forcePathStyle`, same code targets real S3 in production). Object keys are deterministic: `videos/{publicId}/original` and `videos/{publicId}/thumbnail.jpg`. `StorageService` exposes multipart (`createMultipartUpload`/`presignUploadPart`/`completeMultipartUpload`/`abortMultipartUpload`), `headObject`, `presignGet` (with an optional `response-content-disposition` override), `putObject`, `deleteObject`.
+
+MinIO's server rejects the `AbortIncompleteMultipartUpload` lifecycle rule outright (confirmed via `mc` and raw `aws-cli` S3 API calls — a server limitation, not a client-tooling gap: [minio/minio#16120](https://github.com/minio/minio/issues/16120)). Abandoned-upload cleanup is therefore handled entirely at the application level.
+
+### Abandoned-upload reaper
+
+`AbandonedUploadReaper` (in the worker) finds videos in `uploading` whose `updated_at` is older than `ABANDONED_UPLOAD_CUTOFF_HOURS` (default 24h), aborts their multipart upload, and returns them to `draft`. `AbandonedUploadReaperScheduler` runs it hourly via a plain `setInterval` in `WorkerModule` — no new scheduling library was introduced for this one task.
+
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off

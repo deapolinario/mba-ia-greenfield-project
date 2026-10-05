@@ -27,4 +27,8 @@ export default registerAs('storage', () => ({
     process.env.UPLOAD_ACCEPTED_MIME_TYPES ||
     'video/mp4,video/quicktime,video/webm,video/x-matroska'
   ).split(','),
+  abandonedUploadCutoffHours: parseInt(
+    process.env.ABANDONED_UPLOAD_CUTOFF_HOURS || '24',
+    10,
+  ),
 }));
