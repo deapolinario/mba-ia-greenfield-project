@@ -6,5 +6,9 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
-  "setupFiles": ["dotenv/config"]
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"
+  ],
+  "globalSetup": "<rootDir>/../src/test/jest-global-setup.ts",
+  "setupFiles": ["<rootDir>/../src/test/jest-setup-env.ts"]
 }
