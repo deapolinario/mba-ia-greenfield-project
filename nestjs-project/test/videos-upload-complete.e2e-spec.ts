@@ -11,8 +11,38 @@ import { AuthService } from '../src/auth/auth.service';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import storageConfig from '../src/config/storage.config';
+import { MailService } from '../src/mail/mail.service';
 import { VIDEO_PROCESSING_QUEUE } from '../src/queue/queue.module';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+
+interface LoginResponseBody {
+  access_token: string;
+}
+
+interface InitUploadResponseBody {
+  public_id: string;
+  part_size_bytes: number;
+  parts: { part_number: number; url: string }[];
+}
+
+interface CompleteUploadResponseBody {
+  public_id: string;
+  status: string;
+}
+
+interface VideoErrorResponseBody {
+  error: string;
+}
+
+interface VideoRow {
+  status: string;
+  upload_id: string | null;
+  storage_key: string;
+}
+
+interface VideoProcessingJobData {
+  publicId: string;
+}
 
 // Overriding uploadMaxSizeBytes to a small value keeps the "exceeds ceiling"
 // scenario cheap: a real multi-GB payload is impractical in a test, but a
@@ -74,12 +104,15 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
     const password = 'password123';
 
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = (
+      authService as unknown as { mailService: MailService }
+    ).mailService;
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
 
     await request(app.getHttpServer())
@@ -92,7 +125,7 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
       .post('/auth/login')
       .send({ email, password });
 
-    return res.body.access_token as string;
+    return (res.body as LoginResponseBody).access_token;
   }
 
   async function initAndUploadParts(
@@ -114,11 +147,9 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
     // catches a lying client at completion via HeadObject.
     const realBytes = realBytesOverride ?? sizeBytes;
     const parts: { part_number: number; etag: string }[] = [];
-    const partSizeBytes = initRes.body.part_size_bytes as number;
-    const uploadParts = initRes.body.parts as {
-      part_number: number;
-      url: string;
-    }[];
+    const initBody = initRes.body as InitUploadResponseBody;
+    const partSizeBytes = initBody.part_size_bytes;
+    const uploadParts = initBody.parts;
     for (const part of uploadParts) {
       const body = Buffer.alloc(
         part.part_number < uploadParts.length
@@ -133,7 +164,7 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
       });
     }
 
-    return { publicId: initRes.body.public_id as string, parts };
+    return { publicId: initBody.public_id, parts };
   }
 
   describe('Successful completion', () => {
@@ -147,13 +178,15 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts })
         .expect(200);
 
-      expect(res.body.public_id).toBe(publicId);
-      expect(res.body.status).toBe('processing');
+      const body = res.body as CompleteUploadResponseBody;
+      expect(body.public_id).toBe(publicId);
+      expect(body.status).toBe('processing');
 
       const counts = await queue.getJobCounts('waiting', 'delayed');
       expect(counts.waiting + counts.delayed).toBe(1);
       const jobs = await queue.getJobs(['waiting', 'delayed']);
-      expect(jobs[0].data.publicId).toBe(publicId);
+      const jobData = jobs[0].data as VideoProcessingJobData;
+      expect(jobData.publicId).toBe(publicId);
     }, 30000);
 
     it('clears upload_id and materializes the object at videos/{publicId}/original', async () => {
@@ -166,7 +199,7 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts })
         .expect(200);
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT * FROM "videos" WHERE public_id = $1',
         [publicId],
       );
@@ -187,9 +220,11 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts })
         .expect(403);
 
-      expect(res.body.error).toBe('VIDEO_NOT_OWNED');
+      expect((res.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_NOT_OWNED',
+      );
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT status FROM "videos" WHERE public_id = $1',
         [publicId],
       );
@@ -212,7 +247,9 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts })
         .expect(409);
 
-      expect(res.body.error).toBe('VIDEO_INVALID_STATE_TRANSITION');
+      expect((res.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_INVALID_STATE_TRANSITION',
+      );
 
       const counts = await queue.getJobCounts('waiting', 'delayed');
       expect(counts.waiting + counts.delayed).toBe(1);
@@ -234,9 +271,11 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts })
         .expect(400);
 
-      expect(res.body.error).toBe('VIDEO_SIZE_EXCEEDS_LIMIT');
+      expect((res.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_SIZE_EXCEEDS_LIMIT',
+      );
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT status, storage_key FROM "videos" WHERE public_id = $1',
         [publicId],
       );
@@ -255,7 +294,9 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .send({ parts: [{ part_number: 1, etag: 'abc' }] })
         .expect(404);
 
-      expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+      expect((res.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_NOT_FOUND',
+      );
     });
   });
 
@@ -267,7 +308,7 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
         .set('Authorization', `Bearer ${token}`)
         .send({ title: 'Video', size_bytes: 1024, mime_type: 'video/mp4' })
         .expect(201);
-      const publicId = initRes.body.public_id as string;
+      const publicId = (initRes.body as InitUploadResponseBody).public_id;
 
       const res = await request(app.getHttpServer())
         .delete(`/videos/${publicId}/upload`)
@@ -276,7 +317,7 @@ describe('POST /videos/:publicId/complete and DELETE /videos/:publicId/upload (e
 
       expect(res.body).toEqual({});
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT status, upload_id FROM "videos" WHERE public_id = $1',
         [publicId],
       );

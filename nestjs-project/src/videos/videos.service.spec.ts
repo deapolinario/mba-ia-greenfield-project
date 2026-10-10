@@ -11,8 +11,17 @@ import {
 } from './exceptions/video.exception';
 import { VideosService } from './videos.service';
 
-function makeUniqueError(column: string): QueryFailedError {
-  const err = new QueryFailedError('INSERT', [], new Error()) as any;
+interface UniqueViolationError extends QueryFailedError {
+  code: string;
+  detail: string;
+}
+
+function makeUniqueError(column: string): UniqueViolationError {
+  const err = new QueryFailedError(
+    'INSERT',
+    [],
+    new Error(),
+  ) as UniqueViolationError;
   err.code = '23505';
   err.detail = `Key (${column})=(x) already exists.`;
   return err;
@@ -27,9 +36,9 @@ const CONFIG = {
 
 function makeDeps() {
   const videoRepository = {
-    create: jest.fn((entity: any) => entity),
-    save: jest.fn(),
-    findOne: jest.fn(),
+    create: jest.fn((entity: Partial<Video>) => entity),
+    save: jest.fn<Promise<Partial<Video> | undefined>, [Video]>(),
+    findOne: jest.fn<Promise<Video | null>, [unknown]>(),
   };
   const channelsService = {
     findByUserId: jest.fn().mockResolvedValue({ id: 'channel-1' }),
@@ -347,7 +356,7 @@ describe('VideosService.completeUpload', () => {
       videoProcessingQueue,
     } = makeDeps();
     videoRepository.findOne.mockResolvedValue(makeVideo());
-    videoRepository.save.mockImplementation(async (v: any) => v);
+    videoRepository.save.mockImplementation((v: Video) => Promise.resolve(v));
     const service = new VideosService(
       videoRepository as any,
       channelsService as any,
@@ -383,7 +392,7 @@ describe('VideosService.abortUpload', () => {
       videoProcessingQueue,
     } = makeDeps();
     videoRepository.findOne.mockResolvedValue(makeVideo());
-    videoRepository.save.mockImplementation(async (v: any) => v);
+    videoRepository.save.mockImplementation((v: Video) => Promise.resolve(v));
     const service = new VideosService(
       videoRepository as any,
       channelsService as any,

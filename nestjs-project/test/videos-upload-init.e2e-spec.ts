@@ -8,7 +8,39 @@ import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { MailService } from '../src/mail/mail.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+
+interface LoginResponseBody {
+  access_token: string;
+}
+
+interface VideoPartResponse {
+  part_number: number;
+  url: string;
+  expires_at: string;
+}
+
+interface VideoInitResponseBody {
+  public_id: string;
+  status: string;
+  upload_id: string;
+  part_size_bytes: number;
+  parts: VideoPartResponse[];
+}
+
+interface VideoAdmissionErrorBody {
+  error: string;
+  statusCode: number;
+  message: string | string[];
+}
+
+interface VideoRow {
+  public_id: string;
+  status: string;
+  storage_key: string;
+  upload_id: string | null;
+}
 
 describe('POST /videos (e2e)', () => {
   let app: INestApplication<App>;
@@ -55,12 +87,15 @@ describe('POST /videos (e2e)', () => {
     const password = 'password123';
 
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = (
+      authService as unknown as { mailService: MailService }
+    ).mailService;
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
 
     await request(app.getHttpServer())
@@ -73,7 +108,7 @@ describe('POST /videos (e2e)', () => {
       .post('/auth/login')
       .send({ email, password });
 
-    return res.body.access_token as string;
+    return (res.body as LoginResponseBody).access_token;
   }
 
   describe('Successful initiation', () => {
@@ -90,14 +125,15 @@ describe('POST /videos (e2e)', () => {
         })
         .expect(201);
 
-      expect(typeof res.body.public_id).toBe('string');
-      expect(res.body.public_id.length).toBeGreaterThan(0);
-      expect(res.body.status).toBe('uploading');
-      expect(typeof res.body.upload_id).toBe('string');
-      expect(res.body.upload_id.length).toBeGreaterThan(0);
-      expect(typeof res.body.part_size_bytes).toBe('number');
-      expect(Array.isArray(res.body.parts)).toBe(true);
-      expect(res.body.parts.length).toBeGreaterThan(0);
+      const body = res.body as VideoInitResponseBody;
+      expect(typeof body.public_id).toBe('string');
+      expect(body.public_id.length).toBeGreaterThan(0);
+      expect(body.status).toBe('uploading');
+      expect(typeof body.upload_id).toBe('string');
+      expect(body.upload_id.length).toBeGreaterThan(0);
+      expect(typeof body.part_size_bytes).toBe('number');
+      expect(Array.isArray(body.parts)).toBe(true);
+      expect(body.parts.length).toBeGreaterThan(0);
     }, 30000);
 
     it('returns consecutive signed part entries sized to the declared bytes', async () => {
@@ -114,11 +150,8 @@ describe('POST /videos (e2e)', () => {
         })
         .expect(201);
 
-      const parts = res.body.parts as Array<{
-        part_number: number;
-        url: string;
-        expires_at: string;
-      }>;
+      const body = res.body as VideoInitResponseBody;
+      const parts = body.parts;
       parts.forEach((part, idx) => {
         expect(part.part_number).toBe(idx + 1);
         expect(typeof part.url).toBe('string');
@@ -126,9 +159,7 @@ describe('POST /videos (e2e)', () => {
         expect(Number.isNaN(Date.parse(part.expires_at))).toBe(false);
         expect(Date.parse(part.expires_at)).toBeGreaterThan(Date.now());
       });
-      expect(parts.length).toBe(
-        Math.ceil(sizeBytes / res.body.part_size_bytes),
-      );
+      expect(parts.length).toBe(Math.ceil(sizeBytes / body.part_size_bytes));
     }, 30000);
 
     it('persists a draft row owned by the authenticated channel', async () => {
@@ -140,9 +171,10 @@ describe('POST /videos (e2e)', () => {
         .send({ title: 'Video', size_bytes: 1024, mime_type: 'video/mp4' })
         .expect(201);
 
-      const rows = await dataSource.query(
+      const body = res.body as VideoInitResponseBody;
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT * FROM "videos" WHERE public_id = $1',
-        [res.body.public_id],
+        [body.public_id],
       );
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('uploading');
@@ -164,11 +196,13 @@ describe('POST /videos (e2e)', () => {
         .send({ title: 'Video 2', size_bytes: 1024, mime_type: 'video/mp4' })
         .expect(201);
 
-      expect(res1.body.public_id).not.toBe(res2.body.public_id);
+      const body1 = res1.body as VideoInitResponseBody;
+      const body2 = res2.body as VideoInitResponseBody;
+      expect(body1.public_id).not.toBe(body2.public_id);
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<VideoRow[]>(
         'SELECT public_id FROM "videos" WHERE public_id IN ($1, $2)',
-        [res1.body.public_id, res2.body.public_id],
+        [body1.public_id, body2.public_id],
       );
       expect(rows).toHaveLength(2);
     }, 30000);
@@ -188,11 +222,12 @@ describe('POST /videos (e2e)', () => {
         })
         .expect(400);
 
-      expect(res.body.error).toBe('VIDEO_SIZE_EXCEEDS_LIMIT');
-      expect(res.body.statusCode).toBe(400);
-      expect(res.body.message).toBeDefined();
+      const body = res.body as VideoAdmissionErrorBody;
+      expect(body.error).toBe('VIDEO_SIZE_EXCEEDS_LIMIT');
+      expect(body.statusCode).toBe(400);
+      expect(body.message).toBeDefined();
 
-      const rows = await dataSource.query('SELECT * FROM "videos"');
+      const rows = await dataSource.query<VideoRow[]>('SELECT * FROM "videos"');
       expect(rows).toHaveLength(0);
     });
 
@@ -209,9 +244,10 @@ describe('POST /videos (e2e)', () => {
         })
         .expect(400);
 
-      expect(res.body.error).toBe('VIDEO_MIME_TYPE_NOT_ACCEPTED');
+      const body = res.body as VideoAdmissionErrorBody;
+      expect(body.error).toBe('VIDEO_MIME_TYPE_NOT_ACCEPTED');
 
-      const rows = await dataSource.query('SELECT * FROM "videos"');
+      const rows = await dataSource.query<VideoRow[]>('SELECT * FROM "videos"');
       expect(rows).toHaveLength(0);
     });
   });
@@ -223,9 +259,10 @@ describe('POST /videos (e2e)', () => {
         .send({ title: 'Video', size_bytes: 1024, mime_type: 'video/mp4' })
         .expect(401);
 
-      expect(res.body.public_id).toBeUndefined();
+      const body = res.body as Partial<VideoInitResponseBody>;
+      expect(body.public_id).toBeUndefined();
 
-      const rows = await dataSource.query('SELECT * FROM "videos"');
+      const rows = await dataSource.query<VideoRow[]>('SELECT * FROM "videos"');
       expect(rows).toHaveLength(0);
     });
   });
