@@ -6,8 +6,14 @@ jest.mock('node:child_process', () => ({ spawn: jest.fn() }));
 
 const mockedSpawn = spawn as unknown as jest.Mock;
 
-function mockSpawn(stdout: string, exitCode = 0) {
-  const child = new EventEmitter() as any;
+interface MockChildProcess extends EventEmitter {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  kill: jest.Mock;
+}
+
+function mockSpawn(stdout: string, exitCode = 0): MockChildProcess {
+  const child = new EventEmitter() as MockChildProcess;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = jest.fn();

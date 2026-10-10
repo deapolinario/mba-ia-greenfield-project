@@ -9,9 +9,39 @@ import { AuthService } from '../src/auth/auth.service';
 import { Channel } from '../src/channels/entities/channel.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
-import { Video, VideoStatus } from '../src/videos/entities/video.entity';
+import {
+  Video,
+  VideoMetadata,
+  VideoStatus,
+} from '../src/videos/entities/video.entity';
+
+interface RegisterResponseBody {
+  id: string;
+}
+
+interface LoginResponseBody {
+  access_token: string;
+}
+
+interface VideoReadResponseBody {
+  public_id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  duration_seconds: number | null;
+  metadata: VideoMetadata | null;
+  thumbnail_url: string | null;
+  processing_error: string | null;
+}
+
+interface VideoErrorResponseBody {
+  error: string;
+  title?: string;
+  status?: string;
+}
 
 describe('GET /videos/:publicId (e2e)', () => {
   let app: INestApplication<App>;
@@ -67,12 +97,15 @@ describe('GET /videos/:publicId (e2e)', () => {
     const password = 'password123';
 
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = (
+      authService as unknown as { mailService: MailService }
+    ).mailService;
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
 
     const registerRes = await request(app.getHttpServer())
@@ -85,12 +118,13 @@ describe('GET /videos/:publicId (e2e)', () => {
       .post('/auth/login')
       .send({ email, password });
 
+    const registerBody = registerRes.body as RegisterResponseBody;
     const channel = await channelRepository.findOneBy({
-      user_id: registerRes.body.id,
+      user_id: registerBody.id,
     });
 
     return {
-      accessToken: loginRes.body.access_token as string,
+      accessToken: (loginRes.body as LoginResponseBody).access_token,
       channelId: channel!.id,
     };
   }
@@ -123,12 +157,13 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.public_id).toBe(video.public_id);
-      expect(res.body.title).toBe('Seeded video');
+      const body = res.body as VideoReadResponseBody;
+      expect(body.public_id).toBe(video.public_id);
+      expect(body.title).toBe('Seeded video');
       expect(['draft', 'uploading', 'processing', 'ready', 'failed']).toContain(
-        res.body.status,
+        body.status,
       );
-      expect(Number.isNaN(Date.parse(res.body.created_at))).toBe(false);
+      expect(Number.isNaN(Date.parse(body.created_at))).toBe(false);
     });
 
     it('nulls processing outputs while processing', async () => {
@@ -142,10 +177,11 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.status).toBe('processing');
-      expect(res.body.duration_seconds).toBeNull();
-      expect(res.body.metadata).toBeNull();
-      expect(res.body.thumbnail_url).toBeNull();
+      const body = res.body as VideoReadResponseBody;
+      expect(body.status).toBe('processing');
+      expect(body.duration_seconds).toBeNull();
+      expect(body.metadata).toBeNull();
+      expect(body.thumbnail_url).toBeNull();
     });
 
     it('exposes metadata and a servable thumbnail when ready', async () => {
@@ -177,18 +213,20 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.duration_seconds).toBeGreaterThan(0);
-      expect(res.body.metadata).toMatchObject({
+      const body = res.body as VideoReadResponseBody;
+      expect(body.duration_seconds).toBeGreaterThan(0);
+      expect(body.metadata).toMatchObject({
         width: 1920,
         height: 1080,
         video_codec: 'h264',
         container: 'mov,mp4,m4a,3gp,3g2,mj2',
         size_bytes: 1024,
       });
-      expect(typeof res.body.thumbnail_url).toBe('string');
-      expect(res.body.thumbnail_url.length).toBeGreaterThan(0);
+      expect(typeof body.thumbnail_url).toBe('string');
+      const thumbnailUrl = body.thumbnail_url as string;
+      expect(thumbnailUrl.length).toBeGreaterThan(0);
 
-      const imageRes = await fetch(res.body.thumbnail_url);
+      const imageRes = await fetch(thumbnailUrl);
       expect(imageRes.status).toBe(200);
       expect(imageRes.headers.get('content-type')).toMatch(/^image\//);
     }, 15000);
@@ -205,11 +243,12 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.status).toBe('failed');
-      expect(res.body.processing_error).toBe('ffprobe failed: no video stream');
-      expect(res.body.duration_seconds).toBeNull();
-      expect(res.body.metadata).toBeNull();
-      expect(res.body.thumbnail_url).toBeNull();
+      const body = res.body as VideoReadResponseBody;
+      expect(body.status).toBe('failed');
+      expect(body.processing_error).toBe('ffprobe failed: no video stream');
+      expect(body.duration_seconds).toBeNull();
+      expect(body.metadata).toBeNull();
+      expect(body.thumbnail_url).toBeNull();
     });
   });
 
@@ -224,9 +263,10 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${other.accessToken}`)
         .expect(403);
 
-      expect(res.body.error).toBe('VIDEO_NOT_OWNED');
-      expect(res.body.title).toBeUndefined();
-      expect(res.body.status).toBeUndefined();
+      const body = res.body as VideoErrorResponseBody;
+      expect(body.error).toBe('VIDEO_NOT_OWNED');
+      expect(body.title).toBeUndefined();
+      expect(body.status).toBeUndefined();
     });
 
     it('returns 404 for an unknown public id', async () => {
@@ -237,7 +277,9 @@ describe('GET /videos/:publicId (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(404);
 
-      expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+      expect((res.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_NOT_FOUND',
+      );
     });
 
     it('rejects a read without an access token', async () => {
@@ -248,7 +290,7 @@ describe('GET /videos/:publicId (e2e)', () => {
         .get(`/videos/${video.public_id}`)
         .expect(401);
 
-      expect(res.body.title).toBeUndefined();
+      expect((res.body as VideoErrorResponseBody).title).toBeUndefined();
     });
   });
 });

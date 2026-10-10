@@ -1,4 +1,5 @@
-import { envValidationSchema } from './env.validation';
+import type { ValidationError } from 'joi';
+import { envValidationSchema, EnvVars } from './env.validation';
 
 const requiredEnv = {
   DB_USERNAME: 'user',
@@ -13,11 +14,16 @@ const requiredEnv = {
   S3_BUCKET: 'streamtube-videos',
 };
 
-const validate = (env: Record<string, string>) =>
-  envValidationSchema.validate(
+function validate(env: Record<string, string>): {
+  value: EnvVars;
+  error: ValidationError | undefined;
+} {
+  const result = envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
   );
+  return { value: result.value as EnvVars, error: result.error };
+}
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {

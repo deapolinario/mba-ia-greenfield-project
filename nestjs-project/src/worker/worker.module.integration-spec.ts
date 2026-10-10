@@ -21,14 +21,21 @@ describe('WorkerModule (integration)', () => {
   });
 
   it('registers no HTTP controllers', async () => {
+    interface ExpressRouterLayer {
+      route?: unknown;
+    }
+    interface ExpressHttpServer {
+      _events?: { request?: { _router?: { stack?: ExpressRouterLayer[] } } };
+    }
+
     const app = moduleRef.createNestApplication();
     await app.init();
 
-    const httpServer = app.getHttpServer();
+    const httpServer = app.getHttpServer() as ExpressHttpServer;
     // A fully controller-less Nest app has no routes registered on the
     // underlying Express router stack beyond framework defaults.
     const router = httpServer._events?.request?._router;
-    const appRoutes = router?.stack?.filter((layer: any) => layer.route);
+    const appRoutes = router?.stack?.filter((layer) => layer.route);
     expect(appRoutes ?? []).toHaveLength(0);
 
     await app.close();

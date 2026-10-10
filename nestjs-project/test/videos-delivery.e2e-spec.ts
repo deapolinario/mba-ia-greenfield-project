@@ -10,11 +10,24 @@ import { Channel } from '../src/channels/entities/channel.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import storageConfig from '../src/config/storage.config';
+import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { Video, VideoStatus } from '../src/videos/entities/video.entity';
 
 const TEST_PRESIGN_DOWNLOAD_TTL_SECONDS = 2;
+
+interface RegisterResponseBody {
+  id: string;
+}
+
+interface LoginResponseBody {
+  access_token: string;
+}
+
+interface VideoErrorResponseBody {
+  error: string;
+}
 
 describe('GET /videos/:publicId/stream and /download (e2e)', () => {
   let app: INestApplication<App>;
@@ -76,12 +89,15 @@ describe('GET /videos/:publicId/stream and /download (e2e)', () => {
     const password = 'password123';
 
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = (
+      authService as unknown as { mailService: MailService }
+    ).mailService;
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
 
     const registerRes = await request(app.getHttpServer())
@@ -94,12 +110,13 @@ describe('GET /videos/:publicId/stream and /download (e2e)', () => {
       .post('/auth/login')
       .send({ email, password });
 
+    const registerBody = registerRes.body as RegisterResponseBody;
     const channel = await channelRepository.findOneBy({
-      user_id: registerRes.body.id,
+      user_id: registerBody.id,
     });
 
     return {
-      accessToken: loginRes.body.access_token as string,
+      accessToken: (loginRes.body as LoginResponseBody).access_token,
       channelId: channel!.id,
     };
   }
@@ -242,7 +259,9 @@ describe('GET /videos/:publicId/stream and /download (e2e)', () => {
           .redirects(0)
           .expect(409);
 
-        expect(res.body.error).toBe('VIDEO_NOT_READY');
+        expect((res.body as VideoErrorResponseBody).error).toBe(
+          'VIDEO_NOT_READY',
+        );
         expect(res.headers.location).toBeUndefined();
       }
     });
@@ -257,7 +276,9 @@ describe('GET /videos/:publicId/stream and /download (e2e)', () => {
         .set('Authorization', `Bearer ${other.accessToken}`)
         .redirects(0)
         .expect(403);
-      expect(streamRes.body.error).toBe('VIDEO_NOT_OWNED');
+      expect((streamRes.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_NOT_OWNED',
+      );
       expect(streamRes.headers.location).toBeUndefined();
 
       const downloadRes = await request(app.getHttpServer())
@@ -265,7 +286,9 @@ describe('GET /videos/:publicId/stream and /download (e2e)', () => {
         .set('Authorization', `Bearer ${other.accessToken}`)
         .redirects(0)
         .expect(403);
-      expect(downloadRes.body.error).toBe('VIDEO_NOT_OWNED');
+      expect((downloadRes.body as VideoErrorResponseBody).error).toBe(
+        'VIDEO_NOT_OWNED',
+      );
     });
 
     it('rejects delivery without an access token for both stream and download', async () => {

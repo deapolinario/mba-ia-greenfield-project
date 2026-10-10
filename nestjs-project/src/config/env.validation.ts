@@ -1,6 +1,41 @@
 import * as Joi from 'joi';
 
-export const envValidationSchema = Joi.object({
+export interface EnvVars {
+  NODE_ENV: 'development' | 'production' | 'test';
+  PORT: number;
+  DB_HOST: string;
+  DB_PORT: number;
+  DB_USERNAME: string;
+  DB_PASSWORD: string;
+  DB_NAME: string;
+  JWT_SECRET: string;
+  JWT_REFRESH_SECRET: string;
+  JWT_ACCESS_EXPIRATION: string;
+  JWT_REFRESH_EXPIRATION: string;
+  CONFIRMATION_TOKEN_EXPIRATION_HOURS: number;
+  PASSWORD_RESET_TOKEN_EXPIRATION_HOURS: number;
+  APP_URL: string;
+  MAIL_HOST: string;
+  MAIL_PORT: number;
+  MAIL_FROM: string;
+  SWAGGER_ENABLED: 'true' | 'false';
+  REDIS_HOST: string;
+  REDIS_PORT: number;
+  S3_ENDPOINT: string;
+  S3_REGION: string;
+  S3_ACCESS_KEY_ID: string;
+  S3_SECRET_ACCESS_KEY: string;
+  S3_BUCKET: string;
+  S3_FORCE_PATH_STYLE: 'true' | 'false';
+  UPLOAD_PART_SIZE_BYTES: number;
+  PRESIGN_UPLOAD_TTL_SECONDS: number;
+  PRESIGN_DOWNLOAD_TTL_SECONDS: number;
+  UPLOAD_MAX_SIZE_BYTES: number;
+  UPLOAD_ACCEPTED_MIME_TYPES: string;
+  ABANDONED_UPLOAD_CUTOFF_HOURS: number;
+}
+
+export const envValidationSchema = Joi.object<EnvVars, true>({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
     .default('development'),
